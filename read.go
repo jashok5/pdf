@@ -4,7 +4,7 @@
 
 // Package pdf implements reading of PDF files.
 //
-// Overview
+// # Overview
 //
 // PDF is Adobe's Portable Document Format, ubiquitous on the internet.
 // A PDF document is a complex data format built on a fairly simple structure.
@@ -43,7 +43,6 @@
 // they are implemented only in terms of the Value API and could be moved outside
 // the package. Equally important, traversal of other PDF data structures can be implemented
 // in other packages as needed.
-//
 package pdf
 
 // BUG(rsc): The package is incomplete, although it has been used successfully on some
@@ -79,6 +78,7 @@ import (
 // A Reader is a single PDF file open for reading.
 type Reader struct {
 	f          io.ReaderAt
+	file       *os.File
 	end        int64
 	xref       []xref
 	trailer    dict
@@ -100,10 +100,8 @@ func (r *Reader) errorf(format string, args ...interface{}) {
 
 // Open opens a file for reading.
 func Open(file string) (*Reader, error) {
-	// TODO: Deal with closing file.
 	f, err := os.Open(file)
 	if err != nil {
-		f.Close()
 		return nil, err
 	}
 	fi, err := f.Stat()
@@ -111,12 +109,42 @@ func Open(file string) (*Reader, error) {
 		f.Close()
 		return nil, err
 	}
-	return NewReader(f, fi.Size())
+	return NewReaderWithFile(f, fi.Size())
 }
 
 // NewReader opens a file for reading, using the data in f with the given total size.
 func NewReader(f io.ReaderAt, size int64) (*Reader, error) {
 	return NewReaderEncrypted(f, size, nil)
+}
+
+// NewReaderWithFile opens a file for reading, using the data in f with the given total size.
+// This function stores the original file handle for proper closing.
+func NewReaderWithFile(f *os.File, size int64) (*Reader, error) {
+	return NewReaderEncryptedWithFile(f, size, nil)
+}
+
+// NewReaderEncryptedWithFile opens a file for reading, using the data in f with the given total size.
+// If the PDF is encrypted, NewReaderEncryptedWithFile calls pw repeatedly to obtain passwords
+// to try. If pw returns the empty string, NewReaderEncryptedWithFile stops trying to decrypt
+// the file and returns an error. This function stores the original file handle for proper closing.
+func NewReaderEncryptedWithFile(f *os.File, size int64, pw func() string) (*Reader, error) {
+	r, err := NewReaderEncrypted(f, size, pw)
+	if err != nil {
+		return nil, err
+	}
+	r.file = f
+	return r, nil
+}
+
+// Close closes the PDF file.
+// It returns an error if the file cannot be closed or if the Reader was not created with Open.
+func (r *Reader) Close() error {
+	if r == nil || r.file == nil {
+		return nil
+	}
+	err := r.file.Close()
+	r.file = nil
+	return err
 }
 
 // NewReaderEncrypted opens a file for reading, using the data in f with the given total size.
@@ -622,7 +650,7 @@ func (v Value) RawString() string {
 	return x
 }
 
-// Text returns v's string value interpreted as a ``text string'' (defined in the PDF spec)
+// Text returns v's string value interpreted as a “text string” (defined in the PDF spec)
 // and converted to UTF-8.
 // If v.Kind() != String, Text returns the empty string.
 func (v Value) Text() string {
@@ -726,13 +754,13 @@ func (v Value) Len() int {
 	}
 	return len(x)
 }
-//
+
 // resolve xrefs
+//
 //	in: the parent and the key or reference to resolve
 //	out: the reference
 //
-//	bugfix: in case the object-ref is within a stream than nothing was returned 
-//
+//	bugfix: in case the object-ref is within a stream than nothing was returned
 func (r *Reader) resolve(parent objptr, x interface{}) Value {
 
 	if ptr, ok := x.(objptr); ok {
@@ -746,7 +774,7 @@ func (r *Reader) resolve(parent objptr, x interface{}) Value {
 		// var obj object
 		if xref.inStream {
 			strm := r.resolve(parent, xref.stream)
-			
+
 		Search:
 			for {
 				if strm.Kind() != Stream {
@@ -828,7 +856,7 @@ func (e *errorReadCloser) Close() error {
 
 // Reader returns the data contained in the stream v.
 // If v.Kind() != Stream, Reader returns a ReadCloser that
-// responds to all reads with a ``stream not present'' error.
+// responds to all reads with a “stream not present” error.
 func (v Value) Reader() io.ReadCloser {
 	x, ok := v.data.(stream)
 	if !ok {
